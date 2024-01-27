@@ -9,7 +9,7 @@ For more details please use this link: [Swell Bug Bounty](https://immunefi.com/b
 
 | Level |  |
 | :--- | :--- |
-| Critical | up to USD $100,000 |
+| Critical | up to USD $250,000 |
 | High | USD $5,000 |
 | Medium | USD $2,500 |
 
@@ -20,7 +20,7 @@ For more details please use this link: [Swell Bug Bounty](https://immunefi.com/b
 
 | Level |  |
 | :--- | :--- |
-| Critical\* | USD $10,000 |
+| Critical\* | USD $20,000 |
 | High | USD $2,5000 |
 | Medium | USD $1,500 |
 | Low | USD $1,000 |
