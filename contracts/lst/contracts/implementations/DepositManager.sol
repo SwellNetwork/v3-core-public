@@ -86,6 +86,10 @@ contract DepositManager is IDepositManager, Initializable {
     bytes[] calldata _pubKeys,
     bytes32 _depositDataRoot
   ) external override checkRole(SwellLib.BOT) {
+    if (_pubKeys.length == 0) {
+      revert NoPubKeysProvided();
+    }
+
     if (AccessControlManager.botMethodsPaused()) {
       revert SwellLib.BotMethodsPaused();
     }
@@ -95,10 +99,12 @@ contract DepositManager is IDepositManager, Initializable {
       revert InvalidDepositDataRoot();
     }
 
+    uint256 exitingETH = AccessControlManager.swEXIT().exitingETH();
+
     // Validator setup in the deposit contract requires 32 ETH
     uint256 depositAmount = 32 ether;
 
-    if (address(this).balance < _pubKeys.length * depositAmount) {
+    if (address(this).balance < _pubKeys.length * depositAmount + exitingETH) {
       revert InsufficientETHBalance();
     }
 
@@ -111,7 +117,9 @@ contract DepositManager is IDepositManager, Initializable {
     // Cache the withdrawal credentials
     bytes memory withdrawalCredentials = getWithdrawalCredentials();
 
-    for (uint256 i; i < validatorDetails.length; i++) {
+    uint256 validatorDetailsLength = validatorDetails.length;
+
+    for (uint256 i; i < validatorDetailsLength; ) {
       bytes32 depositDataRoot = DepositDataRoot.formatDepositDataRoot(
         validatorDetails[i].pubKey,
         withdrawalCredentials,
@@ -125,9 +133,23 @@ contract DepositManager is IDepositManager, Initializable {
         validatorDetails[i].signature,
         depositDataRoot
       );
+
+      unchecked {
+        ++i;
+      }
     }
 
     emit ValidatorsSetup(_pubKeys);
+  }
+
+  function transferETHForWithdrawRequests(uint256 _amount) external override {
+    if (msg.sender != address(AccessControlManager.swEXIT())) {
+      revert OnlySwEXITCanWithdrawETH();
+    }
+
+    AddressUpgradeable.sendValue(payable(msg.sender), _amount);
+
+    emit EthSent(msg.sender, _amount);
   }
 
   function getWithdrawalCredentials()

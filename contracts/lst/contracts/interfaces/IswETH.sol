@@ -23,11 +23,6 @@ interface IswETH is IERC20Upgradeable {
   error InvalidPreRewardETHReserves();
 
   /**
-   * @dev Error thrown when repricing the rate and distributing rewards to NOs when they are no active validators. This condition should never happen; it means that no active validators were running but we still have rewards, despite this it's still here for security
-   */
-  error NoActiveValidators();
-
-  /**
    * @dev Error thrown when updating the reward percentage for either the NOs or the swell treasury and the update will cause the NO percentage + swell treasury percentage to exceed 100%.
    */
   error RewardPercentageTotalOverflow();
@@ -57,6 +52,11 @@ interface IswETH is IERC20Upgradeable {
     uint256 repriceswETHDiff,
     uint256 maximumswETHRepriceDiff
   );
+
+  /**
+   * @dev Throw when the caller tries to burn 0 swETH
+   */
+  error CannotBurnZeroSwETH();
 
   // ***** Events *****
 
@@ -115,12 +115,14 @@ interface IswETH is IERC20Upgradeable {
    * @param from The account that sent the ETH
    * @param swETHMinted The amount of swETH minted to the caller
    * @param amount The amount of ETH received
+   * @param referral The referrer's address
    */
   event ETHDepositReceived(
     address indexed from,
     uint256 amount,
     uint256 swETHMinted,
-    uint256 newTotalETHDeposited
+    uint256 newTotalETHDeposited,
+    address indexed referral
   );
 
   /**
@@ -166,61 +168,64 @@ interface IswETH is IERC20Upgradeable {
    * @dev Returns the ETH reserves that were provided in the most recent call to the reprice function
    * @return The last recorded ETH reserves
    */
-  function lastRepriceETHReserves() external returns (uint256);
+  function lastRepriceETHReserves() external view returns (uint256);
 
   /**
    * @dev Returns the last time the reprice method was called in UNIX
    * @return The UNIX timestamp of the last time reprice was called
    */
-  function lastRepriceUNIX() external returns (uint256);
+  function lastRepriceUNIX() external view returns (uint256);
 
   /**
    * @dev Returns the total ETH that has been deposited over the protocols lifespan
    * @return The current total amount of ETH that has been deposited
    */
-  function totalETHDeposited() external returns (uint256);
+  function totalETHDeposited() external view returns (uint256);
 
   /**
    * @dev Returns the current swell treasury reward percentage.
    * @return The current swell treasury reward percentage.
    */
-  function swellTreasuryRewardPercentage() external returns (uint256);
+  function swellTreasuryRewardPercentage() external view returns (uint256);
 
   /**
    * @dev Returns the current node operator reward percentage.
    * @return The current node operator reward percentage.
    */
-  function nodeOperatorRewardPercentage() external returns (uint256);
+  function nodeOperatorRewardPercentage() external view returns (uint256);
 
   /**
    * @dev Returns the current SwETH to ETH rate, returns 1:1 if no reprice has occurred otherwise it returns the swETHToETHRateFixed rate.
    * @return The current SwETH to ETH rate.
    */
-  function swETHToETHRate() external returns (uint256);
+  function swETHToETHRate() external view returns (uint256);
 
   /**
    * @dev Returns the current ETH to SwETH rate.
    * @return The current ETH to SwETH rate.
    */
-  function ethToSwETHRate() external returns (uint256);
+  function ethToSwETHRate() external view returns (uint256);
 
   /**
    * @dev Returns the minimum reprice time
    * @return The minimum reprice time
    */
-  function minimumRepriceTime() external returns (uint256);
+  function minimumRepriceTime() external view returns (uint256);
 
   /**
    * @dev Returns the maximum percentage difference with 1e18 precision
    * @return The maximum percentage difference
    */
-  function maximumRepriceDifferencePercentage() external returns (uint256);
+  function maximumRepriceDifferencePercentage() external view returns (uint256);
 
   /**
    * @dev Returns the maximum percentage difference with 1e18 precision
    * @return The maximum percentage difference in suppled and actual swETH supply
    */
-  function maximumRepriceswETHDifferencePercentage() external returns (uint256);
+  function maximumRepriceswETHDifferencePercentage()
+    external
+    view
+    returns (uint256);
 
   /**
    * @dev Sets the new swell treasury reward percentage.
@@ -272,7 +277,19 @@ interface IswETH is IERC20Upgradeable {
   function deposit() external payable;
 
   /**
-  //  * TODO: Reword
+   * @dev Deposits ETH into the contract
+   * @param referral The referrer's address
+   * @notice The amount of ETH deposited will be converted to SwETH at the current SwETH to ETH rate
+   */
+  function depositWithReferral(address referral) external payable;
+
+  /**
+   * @dev Burns the requested amount of swETH, it does not return any ETH to the caller
+   * @param amount The amount of swETH to burn
+   */
+  function burn(uint256 amount) external;
+
+  /**
    * @dev This method reprices the swETH -> ETH rate, this will be called via an offchain service on a regular interval, likely ~1 day. The swETH total supply is passed as an argument to avoid a potential race conditions between the off-chain reserve calculations and the on-chain repricing
    * @dev This method also mints a percentage of swETH as rewards to be claimed by NO's and the swell treasury. The formula for determining the amount of swETH to mint is the following: swETHToMint = (swETHSupply * newETHRewards * feeRate) / (preRewardETHReserves - newETHRewards * feeRate + newETHRewards)
    * @dev The formula is quite complicated because it needs to factor in the updated exchange rate whilst it calculates the amount of swETH rewards to mint. This ensures the rewards aren't double-minted and are backed by ETH.

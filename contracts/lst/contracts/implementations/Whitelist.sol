@@ -81,7 +81,9 @@ contract Whitelist is Initializable, IWhitelist {
   function batchAddToWhitelist(
     address[] calldata _addresses
   ) external checkRole(SwellLib.PLATFORM_ADMIN) {
-    for (uint256 i; i < _addresses.length; ) {
+    uint256 addressesLength = _addresses.length;
+
+    for (uint256 i; i < addressesLength; ) {
       _checkAndAddToWhitelist(_addresses[i]);
 
       unchecked {
@@ -99,7 +101,9 @@ contract Whitelist is Initializable, IWhitelist {
   function batchRemoveFromWhitelist(
     address[] calldata _addresses
   ) external checkRole(SwellLib.PLATFORM_ADMIN) {
-    for (uint256 i; i < _addresses.length; ) {
+    uint256 addressesLength = _addresses.length;
+
+    for (uint256 i; i < addressesLength; ) {
       _checkAndRemoveFromWhitelist(_addresses[i]);
 
       unchecked {

@@ -87,6 +87,40 @@ interface INodeOperatorRegistry is IPoRAddresses {
    */
   event PubKeysUsedForValidatorSetup(bytes[] pubKeys);
 
+  /**
+   * @dev  Emitted when the controlling address for an operator is updated.
+   * @param oldControllingAddress  The old controlling address for the operator.
+   * @param newControllingAddress  The new controlling address for the operator.
+   */
+  event OperatorControllingAddressUpdated(
+    address indexed oldControllingAddress,
+    address indexed newControllingAddress
+  );
+
+  /**
+   * @dev  Emitted when the reward address for an operator is updated.
+   * @param operator  The address of the operator for which the reward address was updated.
+   * @param newRewardAddress  The new reward address for the operator.
+   * @param oldRewardAddress  The old reward address for the operator.
+   */
+  event OperatorRewardAddressUpdated(
+    address indexed operator,
+    address indexed newRewardAddress,
+    address indexed oldRewardAddress
+  );
+
+  /**
+   * @dev  Emitted when the name for an operator is updated.
+   * @param operator  The address of the operator for which the name was updated.
+   * @param newName  The new name for the operator.
+   * @param oldName  The old name for the operator.
+   */
+  event OperatorNameUpdated(
+    address indexed operator,
+    string newName,
+    string oldName
+  );
+
   // ***** Errors *****
   /**
    * @dev Thrown when an operator is not found.
@@ -176,11 +210,26 @@ interface INodeOperatorRegistry is IPoRAddresses {
    */
   error InvalidSignatureLength();
 
+  /**
+   * @dev Thrown when calling the delete active validators method from an address that doens't have the PLATFORM_ADMIN or DELETE_ACTIVE_VALIDATORS role
+   */
+  error InvalidCallerToDeleteActiveValidators();
+
+  /**
+   * @dev Thrown when trying to update the controlling address for an operator and the new controlling address is the same as the current controlling address
+   */
+  error CannotSetOperatorControllingAddressToSameAddress();
+
+  /**
+   * @dev Thrown when trying to update the controlling address for an operator and the new controlling address is already assigned to another operator
+   */
+  error CannotUpdateOperatorControllingAddressToAlreadyAssignedAddress();
+
   // ************************************
   // ***** External  methods ******
 
   /**
-   * @dev This method withdraws contract's _token balance to a platform admin
+   * @dev This method withdraws contract's _token balance to a PLATFORM_ADMIN
    * @param _token The ERC20 token to withdraw from the contract
    */
   function withdrawERC20(IERC20 _token) external;

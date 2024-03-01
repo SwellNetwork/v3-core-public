@@ -158,7 +158,7 @@ contract swETH is
     return _swETHToETHRate().unwrap();
   }
 
-  function deposit() external payable override checkWhitelist(msg.sender) {
+  function _deposit(address referral) internal checkWhitelist(msg.sender) {
     if (AccessControlManager.coreMethodsPaused()) {
       revert SwellLib.CoreMethodsPaused();
     }
@@ -167,7 +167,10 @@ contract swETH is
       revert SwellLib.InvalidETHDeposit();
     }
 
-    uint256 swETHAmount = wrap(msg.value).mul(_ethToSwETHRate()).unwrap();
+    uint256 swETHAmount = wrap(msg.value)
+      .mul(wrap(1 ether))
+      .div(_swETHToETHRate())
+      .unwrap();
 
     _mint(msg.sender, swETHAmount);
 
@@ -182,19 +185,27 @@ contract swETH is
       msg.sender,
       msg.value,
       swETHAmount,
-      totalETHDeposited
+      totalETHDeposited,
+      referral
     );
+  }
+
+  function deposit() external payable override {
+    _deposit(address(0));
+  }
+
+  function depositWithReferral(address referral) external payable override {
+    if (msg.sender == referral) {
+      revert SwellLib.CannotReferSelf();
+    }
+    _deposit(referral);
   }
 
   function reprice(
     uint256 _preRewardETHReserves,
     uint256 _newETHRewards,
     uint256 _swETHTotalSupply
-  ) external override checkRole(SwellLib.BOT) {
-    if (AccessControlManager.botMethodsPaused()) {
-      revert SwellLib.BotMethodsPaused();
-    }
-
+  ) external override checkRole(SwellLib.REPRICER) {
     uint256 currSupply = totalSupply();
 
     if (_swETHTotalSupply == 0 || currSupply == 0) {
@@ -205,25 +216,30 @@ contract swETH is
       revert InvalidPreRewardETHReserves();
     }
 
-    uint256 timeSinceLastReprice = block.timestamp - lastRepriceUNIX;
+    uint256 cachedLastRepriceUNIX = lastRepriceUNIX;
 
-    if (timeSinceLastReprice < minimumRepriceTime) {
+    uint256 timeSinceLastReprice = block.timestamp - cachedLastRepriceUNIX;
+    uint256 cachedMinimumRepriceTime = minimumRepriceTime;
+
+    if (timeSinceLastReprice < cachedMinimumRepriceTime) {
       revert NotEnoughTimeElapsedForReprice(
-        minimumRepriceTime - timeSinceLastReprice
+        cachedMinimumRepriceTime - timeSinceLastReprice
       );
     }
 
     uint256 totalReserves = _preRewardETHReserves + _newETHRewards;
 
+    uint256 cachedNodeOperatorRewardPercentage = nodeOperatorRewardPercentage;
+
     uint256 rewardPercentageTotal = swellTreasuryRewardPercentage +
-      nodeOperatorRewardPercentage;
+      cachedNodeOperatorRewardPercentage;
 
     UD60x18 rewardsInETH = wrap(_newETHRewards).mul(
       wrap(rewardPercentageTotal)
     );
 
     UD60x18 rewardsInSwETH = wrap(_swETHTotalSupply).mul(rewardsInETH).div(
-      wrap(_preRewardETHReserves - rewardsInETH.unwrap() + _newETHRewards)
+      wrap(totalReserves - rewardsInETH.unwrap())
     );
 
     // Also including the amount of new swETH that was minted alongside the provided swETH total supply
@@ -232,14 +248,15 @@ contract swETH is
       .unwrap();
 
     // Ensure that the reprice differences are within expected ranges, only if the reprice method has been called before
-    if (lastRepriceUNIX != 0) {
+    if (cachedLastRepriceUNIX != 0) {
+      uint256 cachedSwETHToETHRateFixed = swETHToETHRateFixed;
       // Check repricing rate difference
       uint256 repriceDiff = _absolute(
         updatedSwETHToETHRateFixed,
-        swETHToETHRateFixed
+        cachedSwETHToETHRateFixed
       );
 
-      uint256 maximumRepriceDiff = wrap(swETHToETHRateFixed)
+      uint256 maximumRepriceDiff = wrap(cachedSwETHToETHRateFixed)
         .mul(wrap(maximumRepriceDifferencePercentage))
         .unwrap();
 
@@ -262,28 +279,28 @@ contract swETH is
     uint256 swellTreasuryRewards;
 
     if (rewardsInSwETH.unwrap() != 0) {
-      _mint(address(this), rewardsInSwETH.unwrap());
-
-      UD60x18 nodeOperatorRewardPortion = wrap(nodeOperatorRewardPercentage)
-        .div(wrap(rewardPercentageTotal));
+      UD60x18 nodeOperatorRewardPortion = wrap(
+        cachedNodeOperatorRewardPercentage
+      ).div(wrap(rewardPercentageTotal));
 
       nodeOperatorRewards = nodeOperatorRewardPortion
         .mul(rewardsInSwETH)
         .unwrap();
 
-      if (nodeOperatorRewards != 0) {
-        INodeOperatorRegistry nodeOperatorRegistry = AccessControlManager
-          .NodeOperatorRegistry();
+      INodeOperatorRegistry nodeOperatorRegistry = AccessControlManager
+        .NodeOperatorRegistry();
 
+      uint256 totalActiveValidators = nodeOperatorRegistry
+        .getPoRAddressListLength();
+
+      if (totalActiveValidators == 0) {
+        nodeOperatorRewards = 0;
+      } else if (nodeOperatorRewards != 0) {
         uint128 totalOperators = nodeOperatorRegistry.numOperators();
 
-        UD60x18 totalActiveValidators = wrap(
-          nodeOperatorRegistry.getPoRAddressListLength()
+        UD60x18 rewardsPerValidator = wrap(nodeOperatorRewards).div(
+          wrap(totalActiveValidators)
         );
-
-        if (totalActiveValidators.unwrap() == 0) {
-          revert NoActiveValidators();
-        }
 
         // Operator Id's start at 1
         for (uint128 i = 1; i <= totalOperators; ) {
@@ -293,12 +310,11 @@ contract swETH is
           ) = nodeOperatorRegistry.getRewardDetailsForOperatorId(i);
 
           if (operatorActiveValidators != 0) {
-            uint256 operatorsRewardShare = wrap(operatorActiveValidators)
-              .div(totalActiveValidators)
-              .mul(wrap(nodeOperatorRewards))
+            uint256 operatorsRewardShare = rewardsPerValidator
+              .mul(wrap(operatorActiveValidators))
               .unwrap();
 
-            _transfer(address(this), rewardAddress, operatorsRewardShare);
+            _mint(rewardAddress, operatorsRewardShare);
           }
 
           // Will never overflow as the total operators are capped at uint128
@@ -308,15 +324,11 @@ contract swETH is
         }
       }
 
-      // Transfer the remaining tokens to the treasury, this includes the swell treasury percentage and if there are any remainder tokens after NO distribution
-      swellTreasuryRewards = balanceOf(address(this));
+      // Transfer the remaining rewards to the treasury
+      swellTreasuryRewards = rewardsInSwETH.unwrap() - nodeOperatorRewards;
 
       if (swellTreasuryRewards != 0) {
-        _transfer(
-          address(this),
-          AccessControlManager.SwellTreasury(),
-          swellTreasuryRewards
-        );
+        _mint(AccessControlManager.SwellTreasury(), swellTreasuryRewards);
       }
     }
 
@@ -325,12 +337,20 @@ contract swETH is
     swETHToETHRateFixed = updatedSwETHToETHRateFixed;
 
     emit Reprice(
-      lastRepriceETHReserves,
-      swETHToETHRateFixed,
+      totalReserves,
+      updatedSwETHToETHRateFixed,
       nodeOperatorRewards,
       swellTreasuryRewards,
       totalETHDeposited
     );
+  }
+
+  function burn(uint256 amount) external override {
+    if (amount == 0) {
+      revert CannotBurnZeroSwETH();
+    }
+
+    _burn(msg.sender, amount);
   }
 
   // ************************************
@@ -349,11 +369,13 @@ contract swETH is
    * @return The rate as a fixed-point type
    */
   function _swETHToETHRate() internal view returns (UD60x18) {
-    if (swETHToETHRateFixed == 0) {
+    uint256 cachedSwETHToETHRateFixed = swETHToETHRateFixed;
+
+    if (cachedSwETHToETHRateFixed == 0) {
       return wrap(1 ether);
     }
 
-    return wrap(swETHToETHRateFixed);
+    return wrap(cachedSwETHToETHRateFixed);
   }
 
   /**

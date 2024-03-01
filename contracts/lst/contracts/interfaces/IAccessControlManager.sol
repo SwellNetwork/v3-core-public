@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {IDepositManager} from "./IDepositManager.sol";
 import {IswETH} from "./IswETH.sol";
+import {IswEXIT} from "./IswEXIT.sol";
 import {INodeOperatorRegistry} from "./INodeOperatorRegistry.sol";
 
 /**
@@ -69,6 +70,13 @@ interface IAccessControlManager is IAccessControlEnumerableUpgradeable {
   event UpdatedSwETH(address newAddress, address oldAddress);
 
   /**
+    @dev Emitted when a new swEXIT contract address is set.
+    @param newAddress The new swEXIT contract address.
+    @param oldAddress The old swEXIT contract address.
+  */
+  event UpdatedSwEXIT(address newAddress, address oldAddress);
+
+  /**
     @dev Emitted when core methods functionality is paused or unpaused.
     @param newPausedStatus The new paused status.
   */
@@ -92,6 +100,11 @@ interface IAccessControlManager is IAccessControlEnumerableUpgradeable {
   */
   event WithdrawalsPause(bool newPausedStatus);
 
+  /**
+    @dev Emitted when all functionality is paused.
+  */
+  event Lockdown();
+
   // ************************************
   // ***** External Methods ******
 
@@ -110,6 +123,13 @@ interface IAccessControlManager is IAccessControlEnumerableUpgradeable {
    * @param _swETH The address of the `swETH` contract.
    */
   function setSwETH(IswETH _swETH) external;
+
+  /**
+   * @notice Sets the `swEXIT` address to `_swEXIT`.
+   * @dev This function is only callable by the `PLATFORM_ADMIN` role.
+   * @param _swEXIT The address of the `swEXIT` contract.
+   */
+  function setSwEXIT(IswEXIT _swEXIT) external;
 
   /**
    * @notice Sets the `DepositManager` address to `_depositManager`.
@@ -146,92 +166,103 @@ interface IAccessControlManager is IAccessControlEnumerableUpgradeable {
     @dev Returns the Swell ETH contract.
     @return The Swell ETH contract.
   */
-  function swETH() external returns (IswETH);
+  function swETH() external view returns (IswETH);
+
+  /**
+   * @dev Returns the swEXIT contract.
+   * @return The swEXIT contract.
+   */
+  function swEXIT() external view returns (IswEXIT);
 
   /**
     @dev Returns the address of the Swell Treasury contract.
     @return The address of the Swell Treasury contract.
   */
-  function SwellTreasury() external returns (address);
+  function SwellTreasury() external view returns (address);
 
   /**
     @dev Returns the Deposit Manager contract.
     @return The Deposit Manager contract.
   */
-  function DepositManager() external returns (IDepositManager);
+  function DepositManager() external view returns (IDepositManager);
 
   /**
     @dev Returns the Node Operator Registry contract.
     @return The Node Operator Registry contract.
   */
-  function NodeOperatorRegistry() external returns (INodeOperatorRegistry);
+  function NodeOperatorRegistry() external view returns (INodeOperatorRegistry);
 
   /**
     @dev Returns true if core methods are currently paused.
     @return Whether core methods are paused.
   */
-  function coreMethodsPaused() external returns (bool);
+  function coreMethodsPaused() external view returns (bool);
 
   /**
     @dev Returns true if bot methods are currently paused.
     @return Whether bot methods are paused.
   */
-  function botMethodsPaused() external returns (bool);
+  function botMethodsPaused() external view returns (bool);
 
   /**
     @dev Returns true if operator methods are currently paused.
     @return Whether operator methods are paused.
   */
-  function operatorMethodsPaused() external returns (bool);
+  function operatorMethodsPaused() external view returns (bool);
 
   /**
     @dev Returns true if withdrawals are currently paused.
     @dev ! Note that this is completely unused in the current implementation and is a placeholder that will be used once the withdrawals are implemented.
     @return Whether withdrawals are paused.
   */
-  function withdrawalsPaused() external returns (bool);
+  function withdrawalsPaused() external view returns (bool);
 
   // ***** Pausable methods ******
 
   /**
-    @dev Pauses the core methods of the Swell ecosystem, only callable by the PLATFORM_ADMIN
+    @dev Pauses the core methods of the Swell ecosystem, only callable by the PAUSER role
   */
   function pauseCoreMethods() external;
 
   /**
-    @dev Unpauses the core methods of the Swell ecosystem, only callable by the PLATFORM_ADMIN
+    @dev Unpauses the core methods of the Swell ecosystem, only callable by the UNPAUSER role
   */
   function unpauseCoreMethods() external;
 
   /**
-    @dev Pauses the bot specific methods, only callable by the PLATFORM_ADMIN
+    @dev Pauses the bot specific methods, only callable by the PAUSER role
   */
   function pauseBotMethods() external;
 
   /**
-    @dev Unpauses the bot specific methods, only callable by the PLATFORM_ADMIN
+    @dev Unpauses the bot specific methods, only callable by the UNPAUSER role
   */
   function unpauseBotMethods() external;
 
   /**
-    @dev Pauses the operator methods in the NO registry contract, only callable by the PLATFORM_ADMIN
+    @dev Pauses the operator methods in the NO registry contract, only callable by the PAUSER role
   */
   function pauseOperatorMethods() external;
 
   /**
-    @dev Unpauses the operator methods in the NO registry contract, only callable by the PLATFORM_ADMIN
+    @dev Unpauses the operator methods in the NO registry contract, only callable by the UNPAUSER role
   */
   function unpauseOperatorMethods() external;
 
   /**
-    @dev Pauses the withdrawals of the Swell ecosystem, only callable by the PLATFORM_ADMIN
+    @dev Pauses the withdrawals of the Swell ecosystem, only callable by the PAUSER role
   */
   function pauseWithdrawals() external;
 
   /**
-    @dev Unpauses the withdrawals of the Swell ecosystem, only callable by the PLATFORM_ADMIN
+    @dev Unpauses the withdrawals of the Swell ecosystem, only callable by the UNPAUSER role
   */
   function unpauseWithdrawals() external;
+
+  /**
+    @dev Pause all the methods in one go, only callable by the PAUSER role.
+  */
+  function lockdown() external;
 
   /**
    * @dev This method withdraws contract's _token balance to a platform admin

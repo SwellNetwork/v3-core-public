@@ -12,11 +12,6 @@ interface IDepositManager {
   // ***** Errors ******
 
   /**
-   * @dev Error thrown when calling the withdrawETH method from an account that isn't the swETH contract
-   */
-  error InvalidETHWithdrawCaller();
-
-  /**
    * @dev Error thrown when the depositDataRoot parameter in the setupValidators contract doesn't match the onchain deposit data root from the deposit contract
    */
   error InvalidDepositDataRoot();
@@ -25,6 +20,16 @@ interface IDepositManager {
    * @dev Error thrown when setting up new validators and the contract doesn't hold enough ETH to be able to set them up.
    */
   error InsufficientETHBalance();
+
+  /**
+   * @dev Error thrown when the transferETHForWithdrawRequests method is called from an account other than swEXIT
+   */
+  error OnlySwEXITCanWithdrawETH();
+
+  /**
+   * @dev Error thrown when no public keys are provided to setupValidators
+   */
+  error NoPubKeysProvided();
 
   // ***** Events ******
 
@@ -41,8 +46,21 @@ interface IDepositManager {
    */
   event ETHReceived(address indexed from, uint256 amount);
 
+  /**
+   * @dev Event is fired when the DepositManager sends ETH, this will currently only happen when swEXIT calls transferETHForWithdrawRequests to get ETH for fulfill withdraw requests
+   * @param to The account that is receiving the ETH
+   * @param amount The amount of ETH sent
+   */
+  event EthSent(address indexed to, uint256 amount);
+
   // ************************************
   // ***** External methods ******
+
+  /**
+   * @dev This method is called by swEXIT when it needs ETH to fulfill withdraw requests
+   * @param _amount The amount of ETH to transfer to swEXIT
+   */
+  function transferETHForWithdrawRequests(uint256 _amount) external;
 
   /**
    * @dev This method withdraws contract's _token balance to a platform admin

@@ -18,6 +18,33 @@ library SwellLib {
    */
   bytes32 public constant BOT = keccak256("BOT");
 
+  /**
+   * @dev The role used for the swETH.reprice method
+   */
+  bytes32 public constant REPRICER = keccak256("REPRICER");
+
+  /**
+   * @dev Used for checking all the pausing methods
+   */
+  bytes32 public constant PAUSER = keccak256("PAUSER");
+
+  /**
+   * @dev Used for checking all the unpausing methods
+   */
+  bytes32 public constant UNPAUSER = keccak256("UNPAUSER");
+
+  /**
+   * @dev Role used specifically in the deleteActiveValidators method
+   */
+  bytes32 public constant DELETE_ACTIVE_VALIDATORS =
+    keccak256("DELETE_ACTIVE_VALIDATORS");
+
+  /**
+   * @dev Role used specifically in the processWithdrawals method
+   */
+  bytes32 public constant PROCESS_WITHDRAWALS =
+    keccak256("PROCESS_WITHDRAWALS");
+
   // ***** Errors *****
   /**
    * @dev Thrown when _checkZeroAddress is called with the zero address
@@ -58,6 +85,11 @@ library SwellLib {
    * @dev Thrown when calling the withdrawERC20 method and the contracts balance is 0
    */
   error NoTokensToWithdraw();
+
+  /**
+   * @dev Thrown when attempting to deposit with referrer the same all calling address
+   */
+  error CannotReferSelf();
 
   // ************************************
   // ***** Internal Methods *****
