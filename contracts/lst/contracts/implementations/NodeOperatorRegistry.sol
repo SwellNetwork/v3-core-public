@@ -158,7 +158,7 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
           foundOperatorId == 0 ||
           smallestOperatorActiveKeys > operatorActiveKeys
         ) {
-          // If no operator has been found yet set the smallest operator active keys to the current operator, or if the current operator has less keys than the smallest operator active keys, then we want to use this operator
+          // If no operator has been found yet set the smallest operator active keys to the current operator, or if the current operator has fewer keys than the smallest operator active keys, then we want to use this operator
           smallestOperatorActiveKeys = operatorActiveKeys;
 
           foundOperatorId = operatorId;
