@@ -50,7 +50,7 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
 
   // The available HEX symbols, used in converting the public key in bytes to string
   bytes16 private constant _SYMBOLS = "0123456789abcdef";
-
+  uint256 private constant SYMBOL_LENGTH = 16; // Because _SYMBOLS.length = 16
 
   /// @custom:oz-upgrades-unsafe-allow constructor
   constructor() {
@@ -110,20 +110,25 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
   {
     validatorDetails = new ValidatorDetails[](_numNewValidators);
 
+    uint256 cacheNumOperators = numOperators;
+
     // Cache the amount of validator details operators have assigned in this method, this prevents accidentally only assigning from the operator with the least active validators
-    uint128[] memory operatorAssignedDetails = new uint128[](numOperators + 1);
+    uint128[] memory operatorAssignedDetails = new uint128[](
+      cacheNumOperators + 1
+    );
 
     uint128 smallestOperatorActiveKeys;
 
-    for (
-      foundValidators;
-      foundValidators < _numNewValidators;
-      foundValidators++
-    ) {
+    for (foundValidators; foundValidators < _numNewValidators; ) {
       uint128 foundOperatorId;
 
       // Iterate over each operator and find the operator with the least amount of active keys, starting from the first operator
-      for (uint128 operatorId = 1; operatorId <= numOperators; operatorId++) {
+      // Not using an unchecked loop here because it will require a fair amount of logic for it to work with the continue statements
+      for (
+        uint128 operatorId = 1;
+        operatorId <= cacheNumOperators;
+        ++operatorId
+      ) {
         // If the operator is disabled, skip
         if (!getOperatorForOperatorId[operatorId].enabled) {
           continue;
@@ -149,14 +154,11 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
           smallestOperatorActiveKeys = 0;
 
           break;
-        } else if (foundOperatorId == 0) {
-          // If no operator has been found yet set the smallest operator active keys to the current operator
-          smallestOperatorActiveKeys = operatorActiveKeys;
-
-          foundOperatorId = operatorId;
-
-          // If the current operator has less keys than the smallest operator active keys, then we want to use this operator
-        } else if (smallestOperatorActiveKeys > operatorActiveKeys) {
+        } else if (
+          foundOperatorId == 0 ||
+          smallestOperatorActiveKeys > operatorActiveKeys
+        ) {
+          // If no operator has been found yet set the smallest operator active keys to the current operator, or if the current operator has less keys than the smallest operator active keys, then we want to use this operator
           smallestOperatorActiveKeys = operatorActiveKeys;
 
           foundOperatorId = operatorId;
@@ -177,6 +179,10 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
         // If no eligible operator's are found exit the loop and return what exists of the array
         break;
       }
+
+      unchecked {
+        ++foundValidators;
+      }
     }
   }
 
@@ -187,9 +193,11 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
       revert InvalidPubKeySetupCaller();
     }
 
-    validatorDetails = new ValidatorDetails[](_pubKeys.length);
+    uint256 pubKeyLength = _pubKeys.length;
 
-    for (uint256 i; i < _pubKeys.length; i++) {
+    validatorDetails = new ValidatorDetails[](pubKeyLength);
+
+    for (uint256 i; i < pubKeyLength; ) {
       uint128 operatorId = _getOperatorIdForPubKeySafe(_pubKeys[i]);
 
       if (!getOperatorForOperatorId[operatorId].enabled) {
@@ -223,9 +231,13 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
       bytes32 encoded = _encodeOperatorIdAndKeyIndex(operatorId, nextKeyIndex);
 
       activeValidatorIndexes.add(encoded);
+
+      unchecked {
+        ++i;
+      }
     }
 
-    numPendingValidators -= _pubKeys.length;
+    numPendingValidators -= pubKeyLength;
 
     emit PubKeysUsedForValidatorSetup(_pubKeys);
 
@@ -241,7 +253,9 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
       revert SwellLib.OperatorMethodsPaused();
     }
 
-    if (_validatorDetails.length == 0) {
+    uint256 validatorDetailsLength = _validatorDetails.length;
+
+    if (validatorDetailsLength == 0) {
       revert InvalidArrayLengthOfZero();
     }
 
@@ -255,13 +269,13 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
     // ! I was unable to figure out a way to test this condition, javascript cannot handle an array this size and the array size it can handle requires that the method be called 1000s of times
     if (
       operatorIdToValidatorDetails[operatorId].length() +
-        _validatorDetails.length >
+        validatorDetailsLength >
       type(uint128).max
     ) {
       revert AmountOfValidatorDetailsExceedsLimit();
     }
 
-    for (uint128 i; i < _validatorDetails.length; i++) {
+    for (uint128 i; i < validatorDetailsLength; ) {
       // NOTE that no signature verification is conducted when validator details are added, this will instead be done via an off-chain service when new validators are getting setup
       if (_validatorDetails[i].pubKey.length != 48) {
         revert InvalidPubKeyLength();
@@ -278,9 +292,13 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
       operatorIdToValidatorDetails[operatorId].add(_validatorDetails[i]);
 
       getOperatorIdForPubKey[_validatorDetails[i].pubKey] = operatorId;
+
+      unchecked {
+        ++i;
+      }
     }
 
-    numPendingValidators += _validatorDetails.length;
+    numPendingValidators += validatorDetailsLength;
 
     emit OperatorAddedValidatorDetails(msg.sender, _validatorDetails);
   }
@@ -303,17 +321,16 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
     }
 
     // Increment numOperators before the assignment, so that the operatorIds start from 1
-    numOperators += 1;
+    uint128 updatedNumOperators = ++numOperators;
 
-    Operator memory operator;
-
-    operator.name = _name;
-    operator.enabled = true;
-    operator.rewardAddress = _rewardAddress;
-    operator.controllingAddress = _operatorAddress;
-
-    getOperatorIdForAddress[_operatorAddress] = numOperators;
-    getOperatorForOperatorId[numOperators] = operator;
+    getOperatorIdForAddress[_operatorAddress] = updatedNumOperators;
+    getOperatorForOperatorId[updatedNumOperators] = Operator(
+      true,
+      _rewardAddress,
+      _operatorAddress,
+      _name,
+      0
+    );
 
     emit OperatorAdded(_operatorAddress, _rewardAddress);
   }
@@ -359,6 +376,10 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
       revert CannotSetOperatorControllingAddressToSameAddress();
     }
 
+    if (getOperatorIdForAddress[_newOperatorAddress] != 0) {
+      revert CannotUpdateOperatorControllingAddressToAlreadyAssignedAddress();
+    }
+
     uint128 operatorId = _getOperatorIdSafe(_operatorAddress);
 
     getOperatorIdForAddress[_newOperatorAddress] = operatorId;
@@ -366,7 +387,11 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
       .controllingAddress = _newOperatorAddress;
 
     delete getOperatorIdForAddress[_operatorAddress];
-    emit OperatorAddressUpdated(_operatorAddress, _newOperatorAddress);
+
+    emit OperatorControllingAddressUpdated(
+      _operatorAddress,
+      _newOperatorAddress
+    );
   }
 
   function updateOperatorRewardAddress(
@@ -380,7 +405,15 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
   {
     Operator storage operator = _getOperatorSafe(_operatorAddress);
 
+    address oldRewardAddress = operator.rewardAddress;
+
     operator.rewardAddress = _newRewardAddress;
+
+    emit OperatorRewardAddressUpdated(
+      _operatorAddress,
+      _newRewardAddress,
+      oldRewardAddress
+    );
   }
 
   function updateOperatorName(
@@ -389,13 +422,19 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
   ) external override checkRole(SwellLib.PLATFORM_ADMIN) {
     Operator storage operator = _getOperatorSafe(_operatorAddress);
 
+    string memory oldName = operator.name;
+
     operator.name = _name;
+
+    emit OperatorNameUpdated(_operatorAddress, _name, oldName);
   }
 
   function deletePendingValidators(
     bytes[] calldata _pubKeys
   ) external override checkRole(SwellLib.PLATFORM_ADMIN) {
-    for (uint128 i; i < _pubKeys.length; i++) {
+    uint256 pubKeysLength = _pubKeys.length;
+
+    for (uint128 i; i < pubKeysLength; ) {
       uint128 operatorId = _getOperatorIdForPubKeySafe(_pubKeys[i]);
 
       uint128 operatorActiveValidators = getOperatorForOperatorId[operatorId]
@@ -409,17 +448,31 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
       }
 
       delete getOperatorIdForPubKey[_pubKeys[i]];
+
+      unchecked {
+        ++i;
+      }
     }
 
-    numPendingValidators -= _pubKeys.length;
+    numPendingValidators -= pubKeysLength;
 
     emit PendingPubKeysDeleted(_pubKeys);
   }
 
-  function deleteActiveValidators(
-    bytes[] calldata _pubKeys
-  ) external override checkRole(SwellLib.PLATFORM_ADMIN) {
-    for (uint256 i; i < _pubKeys.length; i++) {
+  function deleteActiveValidators(bytes[] calldata _pubKeys) external override {
+    if (
+      !AccessControlManager.hasRole(SwellLib.PLATFORM_ADMIN, msg.sender) &&
+      !AccessControlManager.hasRole(
+        SwellLib.DELETE_ACTIVE_VALIDATORS,
+        msg.sender
+      )
+    ) {
+      revert InvalidCallerToDeleteActiveValidators();
+    }
+
+    uint256 pubKeysLength = _pubKeys.length;
+
+    for (uint256 i; i < pubKeysLength; ) {
       uint128 operatorId = _getOperatorIdForPubKeySafe(_pubKeys[i]);
 
       uint128 operatorActiveValidators = getOperatorForOperatorId[operatorId]
@@ -449,6 +502,10 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
       getOperatorForOperatorId[operatorId].activeValidators -= 1;
 
       delete getOperatorIdForPubKey[_pubKeys[i]];
+
+      unchecked {
+        ++i;
+      }
     }
 
     emit ActivePubKeysDeleted(_pubKeys);
@@ -469,14 +526,19 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
     bytes memory pubKey
   ) internal pure returns (string memory) {
     // Create the bytes that will hold the converted string
-    bytes memory buffer = new bytes(pubKey.length * 2);
+    // make sure that pubKey.length * 2 <= 2^256
+    uint256 pubKeyLength = pubKey.length;
+    bytes memory buffer = new bytes(pubKeyLength << 1);
 
-    bytes16 symbols = _SYMBOLS;
+    uint256 index;
+    for (uint256 i; i < pubKeyLength; ) {
+      index = i << 1; // i * 2
+      buffer[index] = _SYMBOLS[uint8(pubKey[i]) >> 4]; // SYMBOL_LENGTH = 2^4
+      buffer[index + 1] = _SYMBOLS[uint8(pubKey[i]) % SYMBOL_LENGTH];
 
-    // This conversion relies on taking the uint8 value of each byte, the first character in the byte is the uint8 value divided by 16 and the second character is modulo of the 16 division
-    for (uint256 i; i < pubKey.length; i++) {
-      buffer[i * 2] = symbols[uint8(pubKey[i]) / symbols.length];
-      buffer[i * 2 + 1] = symbols[uint8(pubKey[i]) % symbols.length];
+      unchecked {
+        ++i;
+      }
     }
 
     return string(abi.encodePacked("0x", buffer));
@@ -509,7 +571,7 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
 
     string[] memory addresses = new string[](numAddresses);
 
-    for (uint256 i; i < numAddresses; i++) {
+    for (uint256 i; i < numAddresses; ) {
       uint256 values = uint256(activeValidatorIndexes.at(i + _startIndex));
 
       // Split the response to get the operatorId and keyIndex values
@@ -521,6 +583,10 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
         .pubKey;
 
       addresses[i] = _parsePubKeyToString(pubKey);
+
+      unchecked {
+        ++i;
+      }
     }
 
     return addresses;
@@ -622,13 +688,17 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
   {
     uint128 operatorId = _getOperatorIdSafe(_operatorAddress);
 
-    if (operatorIdToValidatorDetails[operatorId].length() == 0) {
+    uint256 operatorsValidatorDetailsLength = operatorIdToValidatorDetails[
+      operatorId
+    ].length();
+
+    if (operatorsValidatorDetailsLength == 0) {
       return validatorDetails;
     }
 
     validatorDetails = operatorIdToValidatorDetails[operatorId].range(
       getOperatorForOperatorId[operatorId].activeValidators,
-      operatorIdToValidatorDetails[operatorId].length() - 1
+      operatorsValidatorDetailsLength - 1
     );
   }
 
@@ -654,13 +724,16 @@ contract NodeOperatorRegistry is INodeOperatorRegistry, Initializable {
   {
     uint128 operatorId = _getOperatorIdSafe(_operatorAddress);
 
-    if (getOperatorForOperatorId[operatorId].activeValidators == 0) {
+    uint128 operatorsActiveValidators = getOperatorForOperatorId[operatorId]
+      .activeValidators;
+
+    if (operatorsActiveValidators == 0) {
       return validatorDetails;
     }
 
     validatorDetails = operatorIdToValidatorDetails[operatorId].range(
       0,
-      getOperatorForOperatorId[operatorId].activeValidators - 1
+      operatorsActiveValidators - 1
     );
   }
 }

@@ -8,6 +8,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IAccessControlManager} from "../interfaces/IAccessControlManager.sol";
 import {IDepositManager} from "../interfaces/IDepositManager.sol";
 import {IrswETH} from "../interfaces/IrswETH.sol";
+import {IrswEXIT} from "../interfaces/IrswEXIT.sol";
 import {INodeOperatorRegistry} from "../interfaces/INodeOperatorRegistry.sol";
 
 import {SwellLib} from "../libraries/SwellLib.sol";
@@ -33,6 +34,8 @@ contract AccessControlManager is
   bool public override botMethodsPaused;
   bool public override operatorMethodsPaused;
   bool public override withdrawalsPaused;
+
+  IrswEXIT public override rswEXIT;
 
   /// @custom:oz-upgrades-unsafe-allow constructor
   constructor() {
@@ -166,23 +169,34 @@ contract AccessControlManager is
     SwellTreasury = _swellTreasury;
   }
 
+  function setRswEXIT(
+    IrswEXIT _rswEXIT
+  )
+    external
+    override
+    onlyRole(SwellLib.PLATFORM_ADMIN)
+    checkZeroAddress(address(_rswEXIT))
+  {
+    emit UpdatedRswEXIT(address(_rswEXIT), address(rswEXIT));
+
+    rswEXIT = _rswEXIT;
+  }
+
   // ***** Pausable methods ******
 
   function pauseCoreMethods()
     external
     override
-    onlyRole(SwellLib.PLATFORM_ADMIN)
+    onlyRole(SwellLib.PAUSER)
     alreadyPausedStatus(coreMethodsPaused, true)
   {
-    coreMethodsPaused = true;
-
-    emit CoreMethodsPause(true);
+    _pauseCoreMethods();
   }
 
   function unpauseCoreMethods()
     external
     override
-    onlyRole(SwellLib.PLATFORM_ADMIN)
+    onlyRole(SwellLib.UNPAUSER)
     alreadyPausedStatus(coreMethodsPaused, false)
   {
     coreMethodsPaused = false;
@@ -193,18 +207,16 @@ contract AccessControlManager is
   function pauseBotMethods()
     external
     override
-    onlyRole(SwellLib.PLATFORM_ADMIN)
+    onlyRole(SwellLib.PAUSER)
     alreadyPausedStatus(botMethodsPaused, true)
   {
-    botMethodsPaused = true;
-
-    emit BotMethodsPause(true);
+    _pauseBotMethods();
   }
 
   function unpauseBotMethods()
     external
     override
-    onlyRole(SwellLib.PLATFORM_ADMIN)
+    onlyRole(SwellLib.UNPAUSER)
     alreadyPausedStatus(botMethodsPaused, false)
   {
     botMethodsPaused = false;
@@ -215,18 +227,16 @@ contract AccessControlManager is
   function pauseOperatorMethods()
     external
     override
-    onlyRole(SwellLib.PLATFORM_ADMIN)
+    onlyRole(SwellLib.PAUSER)
     alreadyPausedStatus(operatorMethodsPaused, true)
   {
-    operatorMethodsPaused = true;
-
-    emit OperatorMethodsPause(true);
+    _pauseOperatorMethods();
   }
 
   function unpauseOperatorMethods()
     external
     override
-    onlyRole(SwellLib.PLATFORM_ADMIN)
+    onlyRole(SwellLib.UNPAUSER)
     alreadyPausedStatus(operatorMethodsPaused, false)
   {
     operatorMethodsPaused = false;
@@ -237,18 +247,16 @@ contract AccessControlManager is
   function pauseWithdrawals()
     external
     override
-    onlyRole(SwellLib.PLATFORM_ADMIN)
+    onlyRole(SwellLib.PAUSER)
     alreadyPausedStatus(withdrawalsPaused, true)
   {
-    withdrawalsPaused = true;
-
-    emit WithdrawalsPause(true);
+    _pauseWithdrawals();
   }
 
   function unpauseWithdrawals()
     external
     override
-    onlyRole(SwellLib.PLATFORM_ADMIN)
+    onlyRole(SwellLib.UNPAUSER)
     alreadyPausedStatus(withdrawalsPaused, false)
   {
     withdrawalsPaused = false;
@@ -256,10 +264,46 @@ contract AccessControlManager is
     emit WithdrawalsPause(false);
   }
 
+  function lockdown() external override onlyRole(SwellLib.PAUSER) {
+    _pauseCoreMethods();
+    _pauseBotMethods();
+    _pauseOperatorMethods();
+    _pauseWithdrawals();
+
+    emit Lockdown();
+  }
+
   // ************************************
   // ***** External - view ******
 
   function PLATFORM_ADMIN() external pure override returns (bytes32) {
     return SwellLib.PLATFORM_ADMIN;
+  }
+
+  // ************************************
+  // ***** Internal ******
+
+  function _pauseCoreMethods() internal {
+    coreMethodsPaused = true;
+
+    emit CoreMethodsPause(true);
+  }
+
+  function _pauseBotMethods() internal {
+    botMethodsPaused = true;
+
+    emit BotMethodsPause(true);
+  }
+
+  function _pauseOperatorMethods() internal {
+    operatorMethodsPaused = true;
+
+    emit OperatorMethodsPause(true);
+  }
+
+  function _pauseWithdrawals() internal {
+    withdrawalsPaused = true;
+
+    emit WithdrawalsPause(true);
   }
 }

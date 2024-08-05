@@ -2,7 +2,7 @@
 pragma solidity 0.8.16;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {RepriceSnapshot} from "../libraries/Repricing.sol";
+import {UpgradeableRepriceSnapshot} from "../libraries/Repricing.sol";
 import {AggregatorV3Interface} from "../vendors/AggregatorV3Interface.sol";
 import {IrswETH} from "../interfaces/IrswETH.sol";
 
@@ -64,6 +64,51 @@ interface IRepricingOracle {
     uint256 maximumV3ReservesExternalPoRDiff
   );
 
+  /**
+   * @dev Error thrown when round data is read from the oracle and the updatedAt time is greater than the block.timestamp + maximumRoundDataStalenessTime
+   * @param latestRoundDataTime The round data time
+   * @param secondsSinceExpiry The number of seconds since the round data expired
+   */
+  error RoundDataIsStale(
+    uint256 latestRoundDataTime,
+    uint256 secondsSinceExpiry
+  );
+
+  /**
+   * @dev Error thrown when calling process withdrawals and the totalETHExited provided in the snapshot doesn't match rswEXIT.totalETHExited after processWithdrawals is called
+   */
+  error ProcessWithdrawalsTotalETHExitedMismatch();
+
+  /**
+   * @dev Error thrown after calling process withdrawals and the exitingETH provided in the snapshot is less than rswEXIT.exitingETH
+   */
+  error ProcessWithdrawalsExitingETHMustMonotonicallyIncrease();
+
+  /**
+   * @dev Error thrown when the reference price computed from on-chain values differs from the new price resulting from the snapshot submission by more than the allowed threshold.
+   * @param referencePriceDiff The difference between the new price and the reference price
+   * @param maximumReferencePriceDiffPercentage The maximum allowed difference between the new price and the on-chain reference price
+   */
+  error ReferencePriceDiffTooHigh(
+    uint256 referencePriceDiff,
+    uint256 maximumReferencePriceDiffPercentage
+  );
+
+  /**
+   * @dev Error thrown when attempting to compute the reference price with a rswETH supply of zero.
+   */
+  error CannotComputeReferencePriceWithZeroRswETHSupply();
+
+  /**
+   * @dev Error thrown when the timestamp supplied in a repricing report is exceeds the current block's timestamp.
+   * @param snapshotTimestamp The timestamp supplied in the repricing report.
+   * @param blockTimestamp The current block's timestamp.
+   */
+  error RepriceTimestampTooHigh(
+    uint256 snapshotTimestamp,
+    uint256 blockTimestamp
+  );
+
   // ***** Events ******
 
   /**
@@ -75,12 +120,6 @@ interface IRepricingOracle {
     address oldAddress,
     address newAddress
   );
-
-  /**
-   * @dev Event emitted on a successful call to unset the address of the external Proof of Reserves (PoR) contract. When unset, PoR checks are skipped during repricing.
-   * @param oldAddress The previous address of the PoR contract, now zero.
-   */
-  event ExternalV3ReservesPoROracleAddressUnset(address oldAddress);
 
   /**
    * @dev Event emitted on a successful call to setMaximumRepriceBlockAtSnapshotStaleness
@@ -119,6 +158,24 @@ interface IRepricingOracle {
   );
 
   /**
+   * @dev Event emitted when a reprice snapshot submitted to initiate the repricing process.
+   * @param blockNumber The block number at the time of the snapshot.
+   * @param slot The slot on the beacon chain associated with the snapshot block.
+   * @param reportTimestamp A timestamp provided by the execution bot, indicating when it started calculations.
+   * @param totalETHDeposited The total ETH deposited at the time of the snapshot.
+   * @param rswETHTotalSupply The total rswETH supply at the time of the snapshot.
+   * @param totalETHExited The total ETH exited via processed withdrawal requests at the time of the snapshot.
+   */
+  event SnapshotSubmittedV2(
+    uint256 indexed blockNumber,
+    uint256 slot,
+    uint256 reportTimestamp,
+    uint256 totalETHDeposited,
+    uint256 rswETHTotalSupply,
+    uint256 totalETHExited
+  );
+
+  /**
    * @dev Event emitted when reserves are recorded following a repricing snapshot submission.
    * @param blockAtSnapshot The block number at the time of the snapshot.
    * @param elBalance ETH in Swell controlled contracts on the execution layer at the time of the snapshot, which has not yet been deposited on the beacon chain.
@@ -137,6 +194,28 @@ interface IRepricingOracle {
   );
 
   /**
+   * @dev Event emitted when reserves are recorded following a repricing snapshot submission.
+   * @param blockAtSnapshot The block number at the time of the snapshot.
+   * @param elBalance ETH in Swell controlled contracts on the execution layer at the time of the snapshot, which has not yet been deposited on the beacon chain. Does not include swEXIT balance.
+   * @param clV3Balance The total sum of ETH held by v3 validators on the consensus layer at the moment of the snapshot's slot.
+   * @param clV2Balance The total sum of ETH held by v2 validators on the consensus layer at the moment of the snapshot's slot.
+   * @param transitioningBalance ETH Reserves held by validators transitioning to the beacon chain at the time of the snapshot.
+   * @param newETHReserves Reserve assets minus exiting ETH.
+   * @param reserveAssets The sum of all balances in the snapshot.
+   * @param exitingETH The current amount of exiting ETH, which is has not yet been processed for withdrawals. This value estimates the amount of ETH that will exit when withdrawals are processed.
+   */
+  event ReservesRecordedV2(
+    uint256 indexed blockAtSnapshot,
+    uint256 elBalance,
+    uint256 clV3Balance,
+    uint256 clV2Balance,
+    uint256 transitioningBalance,
+    uint256 newETHReserves,
+    uint256 reserveAssets,
+    uint256 exitingETH
+  );
+
+  /**
    * @dev Event emitted when rewards are calculated during reprice.
    * @param blockAtSnapshot The block number at the time of the repricing snapshot.
    * @param blockOfLastSnapshot The block number of the last repricing snapshot. In conjunction with blockAtSnapshot, this describes the period over which rewards were calculated.
@@ -150,6 +229,44 @@ interface IRepricingOracle {
     int256 reservesChange,
     uint256 ethDepositsChange,
     uint256 rewardsPayableForFees
+  );
+
+  /**
+   * @dev Event emitted when rewards are calculated during reprice.
+   * @param blockAtSnapshot The block number at the time of the repricing snapshot.
+   * @param blockOfLastSnapshot The block number of the last repricing snapshot. In conjunction with blockAtSnapshot, this describes the period over which rewards were calculated.
+   * @param reserveAssetsChange Change in reserve assets since the last repricing.
+   * @param ethDepositsChange Change in total ETH deposited by stakers since the last repricing.
+   * @param rewardsPayableForFees The amount of rewards to be distributed among rswETH holders, node operators, and the Swell Treasury, resulting from changes to total reserves and total ETH deposited.
+   * @param ethExitedChange Change in the total amount of ETH that has exited the protocol, due to processed withdrawals.
+   */
+  event RewardsCalculatedV2(
+    uint256 indexed blockAtSnapshot,
+    uint256 blockOfLastSnapshot,
+    int256 reserveAssetsChange,
+    uint256 ethDepositsChange,
+    uint256 rewardsPayableForFees,
+    uint256 ethExitedChange
+  );
+
+  /**
+   * @dev Event emitted when the maximum round data staleness time is updated by the PLATFORM_ADMIN
+   * @param _oldMaximumRoundDataStalenessTime The old maximum staleness time for chainlink data
+   * @param _newMaximumRoundDataStalenessTime The new maximum staleness time for chainlink data
+   */
+  event MaximumRoundDataStalenessTimeUpdated(
+    uint256 _oldMaximumRoundDataStalenessTime,
+    uint256 _newMaximumRoundDataStalenessTime
+  );
+
+  /**
+   * @dev Event emitted when the maximum reference price difference percentage is updated by the PLATFORM_ADMIN
+   * @param _oldMaximumReferencePriceDiffPercentage The old maximum reference price difference percentage
+   * @param _newMaximumReferencePriceDiffPercentage The new maximum reference price difference percentage
+   */
+  event MaximumReferencePriceDiffPercentageUpdated(
+    uint256 _oldMaximumReferencePriceDiffPercentage,
+    uint256 _newMaximumReferencePriceDiffPercentage
   );
 
   // ************************************
@@ -171,6 +288,12 @@ interface IRepricingOracle {
     returns (uint256);
 
   /**
+   * @dev Returns the maximum length of time that can elapse between the last round data update and the current block timestamp before the chainlink data is considered stale, in which case the transaction will revert
+   * @return The maximum staleness time for chainlink data
+   */
+  function maximumRoundDataStalenessTime() external view returns (uint256);
+
+  /**
    * @dev Returns the maximum percentage difference allowed between a repricing snapshot's v3 validator reserves and the externally reported v3 reserves.
    * @return The maximum percentage difference allowed between the repricing snapshot's reported V3 validator reserves and the externally reported v3 reserves.
    */
@@ -180,10 +303,22 @@ interface IRepricingOracle {
     returns (uint256);
 
   /**
+   * @dev Returns the maximum percentage difference allowed between the new price and the on-chain reference price
+   * @return The maximum percentage difference allowed between the new price and the on-chain reference price
+   */
+  function maximumReferencePriceDiffPercentage()
+    external
+    view
+    returns (uint256);
+
+  /**
    * @dev The repricing snapshot that was most recently used to execute a reprice of the rswETH token.
    * @return The `RepriceSnapshot` struct data that was most recently used to execute a reprice of the rswETH token.
    */
-  function lastRepriceSnapshot() external view returns (RepriceSnapshot memory);
+  function lastRepriceSnapshot()
+    external
+    view
+    returns (UpgradeableRepriceSnapshot memory);
 
   /**
    * @dev Returns the address of the external Proof of Reserves (PoR) contract used for verifying v3 validator reserves during repricing.
@@ -199,7 +334,7 @@ interface IRepricingOracle {
    * @param _snapshot The reprice snapshot struct to be validated
    */
   function assertRepricingSnapshotValidity(
-    RepriceSnapshot calldata _snapshot
+    UpgradeableRepriceSnapshot calldata _snapshot
   ) external view;
 
   /**
@@ -209,7 +344,21 @@ interface IRepricingOracle {
    * @dev Repricing snapshots include other stateful information, associated with a snapshot's block number, necessary to reprice the rswETH token (totalETHDeposited and rswETHTotalSupply).
    * @param _snapshot The `RepriceSnapshot` struct data submitted by the trusted execution bot.
    */
-  function submitSnapshot(RepriceSnapshot calldata _snapshot) external;
+  function submitSnapshot(
+    UpgradeableRepriceSnapshot calldata _snapshot
+  ) external;
+
+  /**
+   * @dev This entrypoint will be used when submitting a snapshot and processing withdrawals. In this case we also want to allow the execution bot to be able to delete active validators.
+   * @param activeValidatorsToDelete The list of active validators to delete
+   * @param _snapshot The `RepriceSnapshot` struct data submitted by the trusted execution bot.
+   * @param lastTokenIDToProcess The last withdrawal token ID to process
+   */
+  function submitSnapshotV2(
+    bytes[] calldata activeValidatorsToDelete,
+    UpgradeableRepriceSnapshot calldata _snapshot,
+    uint256 lastTokenIDToProcess
+  ) external;
 
   /**
    * @dev Sets the threshold number of blocks by which a repricing report is allowed to be stale
@@ -228,17 +377,27 @@ interface IRepricingOracle {
   function setExternalV3ReservesPoROracleAddress(address _newAddress) external;
 
   /**
-   * @dev Unsets the address of the external Proof of Reserves (PoR) contract to be used for verifying v3 validator reserves during repricing.
-   * @notice Only a platform admin can call this function.
-   */
-  function unsetExternalV3ReservesPoROracleAddress() external;
-
-  /**
    * @dev Sets the maximum percentage difference allowed between a repricing snapshot's v3 reserves and the externally reported v3 reserves.
    * @notice Only a platform admin can call this function.
    * @param _newMaximumRepriceV3ReservesExternalPoRDiffPercentage The new maximum percentage difference allowed between current v3 reserves and the externally reported v3 reserves.
    */
   function setMaximumRepriceV3ReservesExternalPoRDiffPercentage(
     uint256 _newMaximumRepriceV3ReservesExternalPoRDiffPercentage
+  ) external;
+
+  /**
+   * @dev Sets the maximum length of time that can elapse between the last round data update and the current block timestamp before the chainlink data is considered stale, in which case the transaction will revert
+   * @param _newMaximumRoundDataStalenessTime The new maximum staleness time for chainlink data
+   */
+  function setMaximumRoundDataStalenessTime(
+    uint256 _newMaximumRoundDataStalenessTime
+  ) external;
+
+  /**
+   * @dev Sets the maximum percentage difference allowed between the new price and the on-chain reference price
+   * @param _newMaximumReferencePriceDiffPercentage The new maximum percentage difference allowed between the new price and the on-chain reference price
+   */
+  function setMaximumReferencePriceDiffPercentage(
+    uint256 _newMaximumReferencePriceDiffPercentage
   ) external;
 }

@@ -6,7 +6,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title RswETH Interface
- * @author https://github.com/max-taylor
  * @dev This interface provides the methods to interact with the RswETH contract.
  */
 interface IrswETH is IERC20Upgradeable {
@@ -21,11 +20,6 @@ interface IrswETH is IERC20Upgradeable {
    * @dev Error thrown when passing a preRewardETHReserves value equal to 0 into the repricing function
    */
   error InvalidPreRewardETHReserves();
-
-  /**
-   * @dev Error thrown when repricing the rate and distributing rewards to NOs when they are no active validators. This condition should never happen; it means that no active validators were running but we still have rewards, despite this it's still here for security
-   */
-  error NoActiveValidators();
 
   /**
    * @dev Error thrown when updating the reward percentage for either the NOs or the swell treasury and the update will cause the NO percentage + swell treasury percentage to exceed 100%.
@@ -50,18 +44,39 @@ interface IrswETH is IERC20Upgradeable {
 
   /**
    * @dev Thrown during repricing when the difference in rswETH supplied to repricing compared to the actual supply is too great
-   * @param repricerswETHDiff The difference between the rswETH supplied to repricing and actual supply
-   * @param maximumrswETHRepriceDiff The maximum allowed difference in rswETH supply
+   * @param repriceRswETHDiff The difference between the rswETH supplied to repricing and actual supply
+   * @param maximumRswETHRepriceDiff The maximum allowed difference in rswETH supply
    */
-  error RepricerswETHDifferenceTooLarge(
-    uint256 repricerswETHDiff, 
-    uint256 maximumrswETHRepriceDiff
+  error RepriceRswETHDifferenceTooLarge(
+    uint256 repriceRswETHDiff,
+    uint256 maximumRswETHRepriceDiff
+  );
+
+  /**
+   * @dev Throw when the caller tries to burn 0 rswETH
+   */
+  error CannotBurnZeroRswETH();
+
+  /**
+   * @dev Error thrown when attempting to call a method that is only callable by the DepositManager contract.
+   */
+  error OnlyDepositManager();
+
+  /**
+   * @dev Error thrown when the amount of rswETH received in exchange for ETH is less than the minimum amount specified.
+   * @dev This can occur during depositViaDepositManager, as the flow must account for slippage.
+   * @param rswETHAmount The amount of rswETH resulting from the exchange rate conversion
+   * @param minRswETH The minimum amount of rswETH required
+   */
+  error InsufficientRswETHReceived(
+    uint256 rswETHAmount,
+    uint256 minRswETH
   );
 
   // ***** Events *****
 
   /**
-   * @dev Event emitted when a user withdraws ETH for rswETH
+   * @dev Event emitted when a user withdraws ETH for swETH
    * @param to Address of the recipient.
    * @param rswETHBurned Amount of RswETH burned in the transaction.
    * @param ethReturned Amount of ETH returned in the transaction.
@@ -136,13 +151,13 @@ interface IrswETH is IERC20Upgradeable {
   );
 
   /**
-   * @dev Event emitted on a successful call to setMaximumRepricerswETHDifferencePercentage
-   * @param _oldMaximumRepricerswETHDifferencePercentage The old maximum rswETH supply difference
-   * @param _newMaximumRepricerswETHDifferencePercentage The new updated rswETH supply difference
+   * @dev Event emitted on a successful call to setMaximumRepriceRswETHDifferencePercentage
+   * @param _oldMaximumRepriceRswETHDifferencePercentage The old maximum rswETH supply difference
+   * @param _newMaximumRepriceRswETHDifferencePercentage The new updated rswETH supply difference
    */
-  event MaximumRepricerswETHDifferencePercentageUpdated(
-    uint256 _oldMaximumRepricerswETHDifferencePercentage,
-    uint256 _newMaximumRepricerswETHDifferencePercentage
+  event MaximumRepriceRswETHDifferencePercentageUpdated(
+    uint256 _oldMaximumRepriceRswETHDifferencePercentage,
+    uint256 _newMaximumRepriceRswETHDifferencePercentage
   );
 
   /**
@@ -153,6 +168,18 @@ interface IrswETH is IERC20Upgradeable {
   event MaximumRepriceDifferencePercentageUpdated(
     uint256 _oldMaximumRepriceDifferencePercentage,
     uint256 _newMaximumRepriceDifferencePercentage
+  );
+
+  /**
+   * @dev Event emitted on successful call from the DepositManager to mint rswETH to a LST depositor
+   * @param _receiver The person receiving the rswETH. Should be the same person who deposited their LST's in the DepositManager
+   * @param _ethSpent The amount of ETH their LST's were worth at the time of deposit. Used to mint rswETH.
+   * @param _rswETHReceived The amount of rswETH received by the user
+   */
+  event DepoistManagerDeposit(
+    address _receiver,
+    uint256 _ethSpent,
+    uint256 _rswETHReceived
   );
 
   // ************************************
@@ -168,61 +195,64 @@ interface IrswETH is IERC20Upgradeable {
    * @dev Returns the ETH reserves that were provided in the most recent call to the reprice function
    * @return The last recorded ETH reserves
    */
-  function lastRepriceETHReserves() external returns (uint256);
+  function lastRepriceETHReserves() external view returns (uint256);
 
   /**
    * @dev Returns the last time the reprice method was called in UNIX
    * @return The UNIX timestamp of the last time reprice was called
    */
-  function lastRepriceUNIX() external returns (uint256);
+  function lastRepriceUNIX() external view returns (uint256);
 
   /**
    * @dev Returns the total ETH that has been deposited over the protocols lifespan
    * @return The current total amount of ETH that has been deposited
    */
-  function totalETHDeposited() external returns (uint256);
+  function totalETHDeposited() external view returns (uint256);
 
   /**
    * @dev Returns the current swell treasury reward percentage.
    * @return The current swell treasury reward percentage.
    */
-  function swellTreasuryRewardPercentage() external returns (uint256);
+  function swellTreasuryRewardPercentage() external view returns (uint256);
 
   /**
    * @dev Returns the current node operator reward percentage.
    * @return The current node operator reward percentage.
    */
-  function nodeOperatorRewardPercentage() external returns (uint256);
+  function nodeOperatorRewardPercentage() external view returns (uint256);
 
   /**
    * @dev Returns the current RswETH to ETH rate, returns 1:1 if no reprice has occurred otherwise it returns the rswETHToETHRateFixed rate.
    * @return The current RswETH to ETH rate.
    */
-  function rswETHToETHRate() external returns (uint256);
+  function rswETHToETHRate() external view returns (uint256);
 
   /**
    * @dev Returns the current ETH to RswETH rate.
    * @return The current ETH to RswETH rate.
    */
-  function ethToRswETHRate() external returns (uint256);
+  function ethToRswETHRate() external view returns (uint256);
 
   /**
    * @dev Returns the minimum reprice time
    * @return The minimum reprice time
    */
-  function minimumRepriceTime() external returns (uint256);
+  function minimumRepriceTime() external view returns (uint256);
 
   /**
    * @dev Returns the maximum percentage difference with 1e18 precision
    * @return The maximum percentage difference
    */
-  function maximumRepriceDifferencePercentage() external returns (uint256);
+  function maximumRepriceDifferencePercentage() external view returns (uint256);
 
   /**
    * @dev Returns the maximum percentage difference with 1e18 precision
-   * @return The maximum percentage difference in suppled and actual rswETH supply
+   * @return The maximum percentage difference in suppled and actual swETH supply
    */
-  function maximumRepricerswETHDifferencePercentage() external returns (uint256);
+  function maximumRepriceRswETHDifferencePercentage()
+    external
+    view
+    returns (uint256);
 
   /**
    * @dev Sets the new swell treasury reward percentage.
@@ -252,14 +282,14 @@ interface IrswETH is IERC20Upgradeable {
   /**
    * @dev Sets the maximum percentage allowable difference in rswETH supplied to repricing compared to current rswETH supply.
    * @notice Only a platform admin can call this function.
-   * @param _maximumRepricerswETHDifferencePercentage The new maximum percentage rswETH supply difference allowed.
+   * @param _maximumRepriceRswETHDifferencePercentage The new maximum percentage rswETH supply difference allowed.
    */
-  function setMaximumRepricerswETHDifferencePercentage(
-    uint256 _maximumRepricerswETHDifferencePercentage
+  function setMaximumRepriceRswETHDifferencePercentage(
+    uint256 _maximumRepriceRswETHDifferencePercentage
   ) external;
 
   /**
-   * @dev Sets the maximum percentage allowable difference in rswETH to ETH price changes for a repricing call.
+   * @dev Sets the maximum percentage allowable difference in swETH to ETH price changes for a repricing call.
    * @notice Only a platform admin can call this function.
    * @param _maximumRepriceDifferencePercentage The new maximum percentage difference in repricing rate.
    */
@@ -281,12 +311,31 @@ interface IrswETH is IERC20Upgradeable {
   function depositWithReferral(address referral) external payable;
 
   /**
-  //  * TODO: Reword
+   * @dev Called when a user deposits a LST into the deposit manager.
+   * @param _amount The amount of ETH to mint rswETH for.
+   * @param _to The address to mint rswETH for.
+   * @param _minRsweTH The minimum amount of rswETH to mint.
+   * @notice Calculates the current LST -> ETH exhange rate and mints the equivalent amount of rswETH to the depositor.
+   * @notice Does not actually deposit ETH into the DepositManager.
+   */
+  function depositViaDepositManager(
+    uint256 _amount,
+    address _to,
+    uint256 _minRsweTH
+  ) external;
+
+  /**
+   * @dev Burns the requested amount of rswETH, it does not return any ETH to the caller
+   * @param amount The amount of rswETH to burn
+   */
+  function burn(uint256 amount) external;
+
+  /**
    * @dev This method reprices the rswETH -> ETH rate, this will be called via an offchain service on a regular interval, likely ~1 day. The rswETH total supply is passed as an argument to avoid a potential race conditions between the off-chain reserve calculations and the on-chain repricing
-   * @dev This method also mints a percentage of rswETH as rewards to be claimed by NO's and the swell treasury. The formula for determining the amount of rswETH to mint is the following: swETHToMint = (swETHSupply * newETHRewards * feeRate) / (preRewardETHReserves - newETHRewards * feeRate + newETHRewards)
+   * @dev This method also mints a percentage of rswETH as rewards to be claimed by NO's and the swell treasury. The formula for determining the amount of rswETH to mint is the following: rswETHToMint = (rswETHSupply * newETHRewards * feeRate) / (preRewardETHReserves - newETHRewards * feeRate + newETHRewards)
    * @dev The formula is quite complicated because it needs to factor in the updated exchange rate whilst it calculates the amount of rswETH rewards to mint. This ensures the rewards aren't double-minted and are backed by ETH.
    * @param _preRewardETHReserves The PoR value exclusive of the new ETH rewards earned
-   * @param _newETHRewards The total amount of new ETH earned over the period.
+   * @param _newETHRewards The total amount of new ETH earnt over the period.
    * @param _rswETHTotalSupply The total rswETH supply at the time of off-chain reprice calculation
    */
   function reprice(
