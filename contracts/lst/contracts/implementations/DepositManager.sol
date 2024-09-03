@@ -18,7 +18,7 @@ import {IDepositContract} from "../vendors/IDepositContract.sol";
 /**
  * @title DepositManager
  * @author https://github.com/max-taylor
- * @notice This contract will hold the ETH while awaiting new validator setup. This contract will also be used as the withdrawal_credentials when setting up new validators, so that any exited validator ETH and rewards will be sent here.
+ * @notice This contract will hold the ETH while awaiting the new validator setup. This contract will also be used as the withdrawal_credentials when setting up new validators, so that any exited validator ETH and rewards will be sent here.
  */
 contract DepositManager is IDepositManager, Initializable {
   using SafeERC20 for IERC20;

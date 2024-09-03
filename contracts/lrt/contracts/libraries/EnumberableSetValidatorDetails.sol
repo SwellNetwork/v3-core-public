@@ -78,7 +78,7 @@ library EnumberableSetValidatorDetails {
   }
 
   /**
-   * @dev This method deletes a given pending pubKey from the set. It also checks whether the pubKey is pending by ensuring that it's index is greater than the active validator details count.
+   * @dev This method deletes a given pending pubKey from the set. It also checks whether the pubKey is pending by ensuring that its index is greater than the active validator details count.
    * @param set The set to delete the pending details from
    * @param pubKey The pubKey to remove from the pending details
    * @param operatorActiveValidators The operator's active validator details count

@@ -7,7 +7,7 @@ Discovered By: Swell Labs
 ## Issue
 
 - The total rewards earned by the Swell protocol since the previous repricing event determines the fees to be minted to the Node Operators and Swell treasury
-- Total rewards earned depends on the delta in the total ETH staked between the previous repricing event and current repricing event
+- Total rewards earned depend on the delta in the total ETH staked between the previous repricing event and the current repricing event
 - Repricing events are calculated off-chain with respect to a given block/slot (aligned such that the slot produced the block)
 - There is no on-chain mechanism to know the total ETH staked at the previous repricing event
 
