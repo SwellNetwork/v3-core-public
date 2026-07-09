@@ -47,7 +47,7 @@ interface IStaking {
     /// @return The balance of staked token of an account.
     function balanceOf(address) external view returns (uint256);
 
-    /// @notice Clean empty request, i.e. when request as been unlocked.
+    /// @notice Clean empty request, i.e. when request has been unlocked.
     function cleanEmptyRequest() external;
 
     /// @notice Get the cooldown time.
